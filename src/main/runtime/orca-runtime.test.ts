@@ -8468,6 +8468,54 @@ describe('OrcaRuntimeService', () => {
       expect(events).toHaveLength(1)
     })
 
+    it('omits terminalSideEffects from non-consuming listeners while other events still flow', () => {
+      const runtime = new OrcaRuntimeService(store)
+      const desktopEvents: RuntimeClientEvent[] = []
+      const mobileEvents: RuntimeClientEvent[] = []
+      runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
+      runtime.onClientEvent((event) => desktopEvents.push(event))
+      runtime.onClientEvent((event) => mobileEvents.push(event), {
+        consumesTerminalSideEffects: false
+      })
+
+      runtime.onPtyData('pty-remote', '\x1b]0;Codex working\x07', 100)
+      runtime.notifyBranchRenamed(TEST_REPO_ID)
+
+      expect(desktopEvents.map((event) => event.type)).toEqual([
+        'terminalSideEffects',
+        'worktreesChanged'
+      ])
+      expect(mobileEvents.map((event) => event.type)).toEqual(['worktreesChanged'])
+    })
+
+    it('keeps fact production idle when only non-consuming listeners exist', () => {
+      const runtime = new OrcaRuntimeService(store)
+      const mobileEvents: RuntimeClientEvent[] = []
+      const trackerEntries = (
+        runtime as unknown as {
+          ptyTitleTrackersByPtyId: Map<string, { commandCodeDetector: unknown }>
+        }
+      ).ptyTitleTrackersByPtyId
+      runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
+      runtime.onClientEvent((event) => mobileEvents.push(event), {
+        consumesTerminalSideEffects: false
+      })
+
+      runtime.onPtyData('pty-remote', '\x1b]0;Codex working\x07\x07', 100)
+
+      expect(mobileEvents).toEqual([])
+      expect(trackerEntries.get('pty-remote')?.commandCodeDetector).toBeNull()
+
+      // A consuming listener re-arms production without leaking batches to mobile.
+      const desktopEvents: RuntimeClientEvent[] = []
+      runtime.onClientEvent((event) => desktopEvents.push(event))
+      runtime.onPtyData('pty-remote', '\x07', 101)
+
+      expect(desktopEvents.map((event) => event.type)).toEqual(['terminalSideEffects'])
+      expect(mobileEvents).toEqual([])
+      expect(trackerEntries.get('pty-remote')?.commandCodeDetector).not.toBeNull()
+    })
+
     it('emits one batched event per chunk with facts in byte order and attribution', () => {
       const { runtime, batches } = createSideEffectRuntime()
       syncSinglePty(runtime)

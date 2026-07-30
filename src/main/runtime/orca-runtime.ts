@@ -2725,6 +2725,11 @@ export class OrcaRuntimeService {
   private ptyController: RuntimePtyController | null = null
   private notifier: RuntimeNotifier | null = null
   private clientEventListeners = new Set<(event: RuntimeClientEvent) => void>()
+  // Why: mobile subscribers have no terminalSideEffects consumer; excluded listeners
+  // neither receive batches nor keep fact production armed.
+  private terminalSideEffectExcludedClientEventListeners = new Set<
+    (event: RuntimeClientEvent) => void
+  >()
   private nativeChatLaunchDraftResolutionByTabId = new Map<
     string,
     NativeChatLaunchDraftResolutionTombstone
@@ -4681,13 +4686,24 @@ export class OrcaRuntimeService {
     }
   }
 
-  onClientEvent(listener: (event: RuntimeClientEvent) => void): () => void {
+  onClientEvent(
+    listener: (event: RuntimeClientEvent) => void,
+    options?: { consumesTerminalSideEffects?: boolean }
+  ): () => void {
     this.clientEventListeners.add(listener)
+    if (options?.consumesTerminalSideEffects === false) {
+      this.terminalSideEffectExcludedClientEventListeners.add(listener)
+    }
     this.refreshTerminalSideEffectConsumerAvailability()
     return () => {
       this.clientEventListeners.delete(listener)
+      this.terminalSideEffectExcludedClientEventListeners.delete(listener)
       this.refreshTerminalSideEffectConsumerAvailability()
     }
+  }
+
+  private countTerminalSideEffectConsumingClientEventListeners(): number {
+    return this.clientEventListeners.size - this.terminalSideEffectExcludedClientEventListeners.size
   }
 
   getTerminalSleepClientEventSnapshot(): RuntimeClientEvent[] {
@@ -4747,9 +4763,18 @@ export class OrcaRuntimeService {
   }
 
   private emitClientEvent(event: RuntimeClientEvent): void {
+    // Why: mobile streams discard terminalSideEffects; skip excluded listeners so
+    // paired phones never receive the per-OSC batch frames over the relay.
+    const listeners =
+      event.type === 'terminalSideEffects' &&
+      this.terminalSideEffectExcludedClientEventListeners.size > 0
+        ? [...this.clientEventListeners].filter(
+            (listener) => !this.terminalSideEffectExcludedClientEventListeners.has(listener)
+          )
+        : this.clientEventListeners
     // Why: a throwing subscriber here once escaped acquireWorktreeTerminalSpawn after it took the
     // per-worktree terminal mutation, leaking it and wedging that worktree's sleep until restart.
-    notifyRuntimeListeners(this.clientEventListeners, (listener) => listener(event), 'client-event')
+    notifyRuntimeListeners(listeners, (listener) => listener(event), 'client-event')
   }
 
   notifyNativeChatLaunchDraftResolved(
@@ -9417,7 +9442,7 @@ export class OrcaRuntimeService {
         console.error('[runtime] terminal side-effect listener threw', { ptyId, err })
       }
     }
-    if (this.clientEventListeners.size > 0) {
+    if (this.countTerminalSideEffectConsumingClientEventListeners() > 0) {
       this.emitClientEvent({ type: 'terminalSideEffects', batch })
     }
   }
@@ -9752,7 +9777,8 @@ export class OrcaRuntimeService {
 
   private refreshTerminalSideEffectConsumerAvailability(): void {
     const nextAvailable =
-      this.terminalSideEffectLocalConsumerAvailable || this.clientEventListeners.size > 0
+      this.terminalSideEffectLocalConsumerAvailable ||
+      this.countTerminalSideEffectConsumingClientEventListeners() > 0
     if (nextAvailable === this.terminalSideEffectConsumerAvailable) {
       return
     }
