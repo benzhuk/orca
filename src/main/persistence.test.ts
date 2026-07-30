@@ -4930,6 +4930,44 @@ describe('Store', () => {
     expect(store.getWorktreeMeta('wt-malformed')?.linkedTaskSourceContext).toBeNull()
   })
 
+  it('tolerates a null worktreeMeta entry while still normalizing valid siblings', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {
+        'r1::/tmp/wt': null,
+        'wt-sibling': {
+          linkedWorkItem: {
+            provider: 'jira',
+            type: 'issue',
+            number: 0,
+            title: 'ORCA-123 Link Jira',
+            url: 'https://company.atlassian.net/browse/ORCA-123',
+            jiraIdentifier: 'ORCA-123'
+          },
+          linkedTaskSourceContext: {
+            kind: 'task-source',
+            provider: 'jira',
+            projectId: 'project-1',
+            hostId: 'local',
+            accountLabel: 44,
+            providerIdentity: {
+              provider: 'jira',
+              siteId: 'site-1',
+              siteUrl: 'https://company.atlassian.net',
+              projectKey: 'ORCA'
+            }
+          }
+        }
+      }
+    })
+
+    const store = await createStore()
+
+    expect(store.getWorktreeMeta('wt-sibling')?.linkedWorkItem?.jiraIdentifier).toBe('ORCA-123')
+    expect(store.getWorktreeMeta('wt-sibling')?.linkedTaskSourceContext).toBeNull()
+  })
+
   it('creates and updates folder workspaces from folder-backed project groups', async () => {
     const store = await createStore()
     const group = store.createProjectGroup({

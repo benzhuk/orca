@@ -426,6 +426,10 @@ function gcStaleWorktreeMeta(state: PersistedState): number {
 function normalizeWorktreeLinkedItemMetadata(state: PersistedState): boolean {
   let changed = false
   for (const meta of Object.values(state.worktreeMeta ?? {})) {
+    // Why: hand-corrupted null entries are a real input class (see gcStaleWorktreeMeta); leave them for GC.
+    if (!meta) {
+      continue
+    }
     const linkedWorkItem = normalizeWorkspaceLinkedItem(meta.linkedWorkItem)
     const sourceContext = normalizeStoredTaskSourceContext(meta.linkedTaskSourceContext)
     const linkedTaskSourceContext = isWorkspaceLinkedItemSourceContextMatch(
