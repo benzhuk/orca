@@ -562,4 +562,134 @@ describe('account CLI handlers', () => {
 
     expect(callMock).toHaveBeenCalledWith('accounts.list', { refreshUsage: false })
   })
+
+  describe('account select', () => {
+    function selectFlags(
+      overrides: Record<string, string | boolean> = {}
+    ): Map<string, string | boolean> {
+      return new Map(Object.entries({ email: 'jane@example.com', ...overrides }))
+    }
+
+    function listResult(
+      accounts: readonly {
+        id: string
+        email: string
+        managedAuthRuntime?: 'host' | 'wsl'
+        wslDistro?: string | null
+        organizationName?: string | null
+      }[]
+    ) {
+      return {
+        id: 'test',
+        ok: true,
+        result: {
+          claude: { accounts, activeAccountId: null },
+          codex: { accounts: [], activeAccountId: null }
+        },
+        _meta: { runtimeId: 'test-runtime' }
+      }
+    }
+
+    it('resolves --email case-insensitively and selects the matching account', async () => {
+      callMock.mockImplementation((method: string) =>
+        Promise.resolve(
+          method === 'accounts.list'
+            ? listResult([{ id: 'claude-1', email: 'Jane@Example.com' }])
+            : {
+                id: 'test',
+                ok: true,
+                result: accountState('jane@example.com'),
+                _meta: { runtimeId: 'test-runtime' }
+              }
+        )
+      )
+
+      await ACCOUNT_HANDLERS['account select']({ ...context('claude'), flags: selectFlags() })
+
+      expect(callMock).toHaveBeenCalledWith('accounts.list', { refreshUsage: false })
+      expect(callMock).toHaveBeenCalledWith('accounts.selectClaude', { accountId: 'claude-1' })
+    })
+
+    it('rejects when no managed account matches the email', async () => {
+      callMock.mockResolvedValue(listResult([]))
+
+      await expect(
+        ACCOUNT_HANDLERS['account select']({ ...context('claude'), flags: selectFlags() })
+      ).rejects.toThrow('No managed Claude account found')
+      expect(callMock).not.toHaveBeenCalledWith('accounts.selectClaude', expect.anything())
+    })
+
+    it('rejects an ambiguous email match with per-account ids the operator can act on', async () => {
+      // Why: the same email legitimately matches two accounts across host/WSL
+      // runtimes or two orgs — the error must name what differs, not just fail.
+      callMock.mockResolvedValue(
+        listResult([
+          { id: 'claude-1', email: 'jane@example.com', managedAuthRuntime: 'host' },
+          {
+            id: 'claude-2',
+            email: 'JANE@EXAMPLE.COM',
+            managedAuthRuntime: 'wsl',
+            wslDistro: 'Ubuntu'
+          }
+        ])
+      )
+
+      await expect(
+        ACCOUNT_HANDLERS['account select']({ ...context('claude'), flags: selectFlags() })
+      ).rejects.toThrow(
+        '"jane@example.com" matches 2 managed Claude accounts on this runtime: claude-1 (host), claude-2 (Ubuntu). Select it in the Orca UI on that host, or remove the stale duplicate.'
+      )
+    })
+
+    it('requires --email', async () => {
+      await expect(
+        ACCOUNT_HANDLERS['account select']({ ...context('claude'), flags: new Map() })
+      ).rejects.toThrow('Missing required --email')
+      expect(callMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects a codex --agent, unlike `account add`', async () => {
+      await expect(
+        ACCOUNT_HANDLERS['account select']({
+          ...context('claude'),
+          flags: selectFlags({ agent: 'codex' })
+        })
+      ).rejects.toThrow('only supports "claude"')
+      expect(callMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects `--agent` with no value instead of defaulting to Claude', async () => {
+      await expect(
+        ACCOUNT_HANDLERS['account select']({
+          ...context('claude'),
+          flags: selectFlags({ agent: true })
+        })
+      ).rejects.toThrow('Missing a value for --agent')
+      expect(callMock).not.toHaveBeenCalled()
+    })
+
+    it('does NOT reject --environment / --pairing-code, unlike `account add`/`account list`', async () => {
+      // Why: `account select` is the cross-scope switch primitive — --environment
+      // must reach the runtime client instead of being rejected like add/list.
+      callMock.mockImplementation((method: string) =>
+        Promise.resolve(
+          method === 'accounts.list'
+            ? listResult([{ id: 'claude-1', email: 'jane@example.com' }])
+            : {
+                id: 'test',
+                ok: true,
+                result: accountState('jane@example.com'),
+                _meta: { runtimeId: 'test-runtime' }
+              }
+        )
+      )
+
+      await ACCOUNT_HANDLERS['account select']({
+        ...context('claude'),
+        flags: selectFlags({ environment: 'homelab', 'pairing-code': 'orca://pair?code=abc' })
+      })
+
+      expect(callMock).toHaveBeenCalledWith('accounts.selectClaude', { accountId: 'claude-1' })
+    })
+  })
 })

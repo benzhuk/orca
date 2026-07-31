@@ -21,6 +21,7 @@ Agent Discovery:
 Accounts:
   account add               Add a managed Claude or Codex account on this Orca host
   account list              List managed Claude and Codex accounts on this Orca host
+  account select            Select the active managed Claude account by email
 
 Skills:
   skills list               List version-matched skill guides bundled with this Orca CLI
@@ -220,6 +221,7 @@ Common Commands:
   orca agent-context [--json]
   orca account add [--agent claude|codex] [--json]
   orca account list [--json]
+  orca account select --email <email> [--agent claude] [--environment <selector>] [--json]
   orca environment add --name <name> --pairing-code <code> [--json]
   orca environment list [--json]
   orca environment show --environment <selector> [--json]
@@ -497,6 +499,9 @@ function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
   if (command === 'account add' && flag === 'agent') {
     return '--agent <id>           Account provider: claude or codex (default claude)'
   }
+  if (command === 'account select' && flag === 'agent') {
+    return '--agent <id>           Account provider: claude only, for now (default claude)'
+  }
   if (flag === 'key' && command === 'computer hotkey') {
     return '--key <key-combo>      Modifier chord with one key, e.g. CmdOrCtrl+A'
   }
@@ -519,6 +524,7 @@ export function formatFlagHelp(flag: string): string {
     direction:
       '--direction <dir>      Direction: up|down|left|right for scroll, horizontal|vertical for split',
     'display-name': '--display-name <name>  Override the Orca display name',
+    email: '--email <address>      Email of the managed account to select (case-insensitive)',
     'element-index': '--element-index <n>   Element index from get-app-state',
     title: '--title <text>         Custom title for the terminal tab (omit to reset)',
     enter: '--enter                Append Enter after sending text',
