@@ -1407,6 +1407,7 @@ export function CodexSwitcherMenu({
   const [isSwitching, setIsSwitching] = useState(false)
   const [isRedeemingReset, setIsRedeemingReset] = useState(false)
   const [reauthenticatingAccountId, setReauthenticatingAccountId] = useState<string | null>(null)
+  const [snapshotRateLimits, setSnapshotRateLimits] = useState<RateLimitState | null>(null)
   const mountedRef = useRef(true)
   const accountsExpandedRef = useRef(accountsExpanded)
   // Why: Radix item-select is separate from the nested button click, so stopPropagation alone won't prevent the row switch.
@@ -1463,6 +1464,8 @@ export function CodexSwitcherMenu({
     }
     if (mountedRef.current) {
       setAccounts(snapshot.codex)
+      // Local snapshots carry no rate limits, so this stays null off a remote.
+      setSnapshotRateLimits(snapshot.rateLimits)
     }
   }, [activeRuntimeEnvironmentId])
 
@@ -1484,6 +1487,36 @@ export function CodexSwitcherMenu({
       console.error('Failed to load Codex accounts for status bar:', error)
     })
   }, [loadAccounts, codexAccountSyncKey])
+
+  // Why: a remote runtime fills its inactive-usage cache lazily AFTER the
+  // accounts.subscribe ready snapshot, so a one-shot read can only ever catch
+  // rows mid-fetch. Hold the stream open while the menu is open and let each
+  // per-account completion broadcast fill the bars in place — the local path
+  // gets the same in-place updates from the rate-limit service's IPC pushes.
+  useEffect(() => {
+    if (!open || !hasActiveRuntimeEnvironment) {
+      return
+    }
+    const watcher = watchProviderAccounts(
+      { activeRuntimeEnvironmentId },
+      {
+        onSnapshot: (snapshot) => {
+          // A failed Codex half is a substituted empty roster; keep prior state.
+          if (snapshot.failedProviders?.includes('codex')) {
+            return
+          }
+          setAccounts(snapshot.codex)
+          setSnapshotRateLimits(snapshot.rateLimits)
+        },
+        onError: (error) => {
+          console.error('Failed to watch Codex accounts for status bar:', error)
+        }
+      }
+    )
+    return () => {
+      watcher.close()
+    }
+  }, [activeRuntimeEnvironmentId, hasActiveRuntimeEnvironment, open])
 
   const handleSelectAccount = async (
     accountId: string | null,
@@ -1660,6 +1693,11 @@ export function CodexSwitcherMenu({
   const selectedGroup =
     switchGroups.find((group) => group.key === selectedRuntimeKey) ?? switchGroups[0]
   const activeTarget = selectedGroup?.targets.find((target) => target.active)
+  const inactiveAccountUsage = resolveInactiveAccountUsage(
+    hasActiveRuntimeEnvironment,
+    snapshotRateLimits?.inactiveCodexAccounts,
+    inactiveCodexAccounts
+  )
   const resetCreditCount = codex.rateLimitResetCredits?.availableCount ?? null
   const resetCreditExpiry =
     resetCreditCount !== null
@@ -1806,7 +1844,7 @@ export function CodexSwitcherMenu({
               <>
                 {selectedGroup.targets.map((target) => {
                   const inactiveUsage = target.id
-                    ? inactiveCodexAccounts.find((a) => a.accountId === target.id)
+                    ? inactiveAccountUsage.find((a) => a.accountId === target.id)
                     : null
                   // Why: sign-in spawns a local `codex login`, so a remote-owned account can't be re-authed from this desktop.
                   const showSignInAction =
