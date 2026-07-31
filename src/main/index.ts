@@ -2853,6 +2853,11 @@ void app.whenReady().then(async () => {
     }
     // Why: headless serve never opens a renderer, so arm scheduled automation dispatch here.
     automations.start()
+    // Why: same reason for usage quotas — attach()/start() only run on window creation,
+    // so without this the poller never fires and the usage bars every paired desktop and
+    // mobile client reads from this runtime stay empty (#10922).
+    rateLimits!.enableHeadlessPolling()
+    rateLimits!.start({ fetchImmediately: false })
     // Why: serve deletes worktrees too, and the history GC that normally drains delete tombstones is
     // armed from the main window — without this, a quit mid-removal leaks the tree until a desktop launch.
     scheduleAllPendingHistoryTreeRemovals()
