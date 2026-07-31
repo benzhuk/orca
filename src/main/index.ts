@@ -115,6 +115,7 @@ import {
   installServeSupervisorDisconnectQuit,
   notifyServeSupervisorReady
 } from './serve-update-handoff'
+import { isServeModeProcess } from './serve-mode'
 import {
   configureElectronNetworkCompatibility,
   configureDevUserDataPath,
@@ -474,7 +475,7 @@ if (appImageCliRedirect.redirected) {
 if (argvRequestsServeMode(process.argv)) {
   process.argv = normalizeServeModeArgv(process.argv)
 }
-const isServeMode = process.argv.includes('--serve')
+const isServeMode = isServeModeProcess()
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(
