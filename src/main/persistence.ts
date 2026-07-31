@@ -425,9 +425,13 @@ function gcStaleWorktreeMeta(state: PersistedState): number {
 
 function normalizeWorktreeLinkedItemMetadata(state: PersistedState): boolean {
   let changed = false
-  for (const meta of Object.values(state.worktreeMeta ?? {})) {
-    // Why: hand-corrupted null entries are a real input class (see gcStaleWorktreeMeta); leave them for GC.
+  const worktreeMeta = state.worktreeMeta ?? {}
+  for (const [key, meta] of Object.entries(worktreeMeta)) {
+    // Why: hand-corrupted null entries are a real input class; drop them here because gcStaleWorktreeMeta
+    // keeps timestamp-less keys forever and every downstream consumer trusts the Record<string, WorktreeMeta> type.
     if (!meta) {
+      delete worktreeMeta[key]
+      changed = true
       continue
     }
     const linkedWorkItem = normalizeWorkspaceLinkedItem(meta.linkedWorkItem)
