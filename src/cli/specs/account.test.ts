@@ -50,4 +50,18 @@ describe('account command specs', () => {
 
     expect(descriptionColumn(help, 'agent')).toBe(descriptionColumn(help, 'json'))
   })
+
+  it('accepts --email and, unlike add/list, documents --environment as retargeting', () => {
+    const select = spec('account select')
+
+    expect(effectiveAllowedFlags(select)).toContain('email')
+    expect(effectiveAllowedFlags(select)).toContain('environment')
+    expect(select.notes?.join('\n')).toContain('DOES retarget')
+  })
+
+  it('rejects a non-claude --agent, unlike `account add`', () => {
+    const help = formatCommandHelp(spec('account select'))
+
+    expect(help).toContain('claude only')
+  })
 })

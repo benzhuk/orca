@@ -41,7 +41,10 @@ vi.mock('./runtime-client', async () => {
       remotePairingCode?: string | null,
       environmentSelector?: string | null
     ) {
-      runtimeClientConstructorMock()
+      // Why: capturing the two remote-selection args (not the full arg list) lets
+      // tests assert whether a command's --environment/--pairing-code actually
+      // reached the client, without every other call site needing to care.
+      runtimeClientConstructorMock(remotePairingCode, environmentSelector)
       const effectivePairingCode =
         remotePairingCode === undefined
           ? (process.env.ORCA_PAIRING_CODE ?? process.env.ORCA_REMOTE_PAIRING)
@@ -209,6 +212,61 @@ describe('command aliases dispatch to the canonical handler', () => {
     } finally {
       vi.unstubAllEnvs()
     }
+  })
+})
+
+describe('account select remote targeting', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    callMock.mockReset()
+    runtimeClientConstructorMock.mockClear()
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    logSpy.mockRestore()
+  })
+
+  it('passes --environment through to the runtime client, unlike `account list`', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req-1', {
+        claude: {
+          accounts: [{ id: 'claude-1', email: 'jane@example.com' }],
+          activeAccountId: null
+        },
+        codex: { accounts: [], activeAccountId: null }
+      }),
+      okFixture('req-2', {
+        accounts: [{ id: 'claude-1', email: 'jane@example.com' }],
+        activeAccountId: 'claude-1'
+      })
+    )
+
+    await main(
+      ['account', 'select', '--email', 'jane@example.com', '--environment', 'homelab', '--json'],
+      '/tmp/repo'
+    )
+
+    expect(process.exitCode).not.toBe(1)
+    expect(runtimeClientConstructorMock).toHaveBeenCalledWith(undefined, 'homelab')
+    expect(callMock).toHaveBeenCalledWith('accounts.selectClaude', { accountId: 'claude-1' })
+  })
+
+  it('still rejects --environment on `account list` before touching the runtime client', async () => {
+    // Why: add/list stay pinned to the local host — the handler must throw before
+    // the lazy `ctx.client` getter ever constructs a RuntimeClient.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await main(['account', 'list', '--environment', 'homelab'], '/tmp/repo')
+
+    expect(process.exitCode).toBe(1)
+    expect(runtimeClientConstructorMock).not.toHaveBeenCalled()
+    const stderr = errorSpy.mock.calls.map((call) => String(call[0])).join('\n')
+    expect(stderr).toContain('does not retarget')
+    errorSpy.mockRestore()
+    process.exitCode = 0
   })
 })
 
