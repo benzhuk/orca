@@ -18,9 +18,8 @@ export const CLIENT_EVENT_METHODS: readonly RpcAnyMethod[] = [
     params: null,
     handler: async (_params, { runtime, connectionId, clientKind }, emit) => {
       await new Promise<void>((resolve) => {
-        // Why: mobile has no terminalSideEffects consumer; excluding it stops
-        // per-OSC batch frames over the relay and lets production idle when
-        // only phones are subscribed.
+        // Why: mobile discards terminalSideEffects; excluding it stops the
+        // per-OSC batch frames from crossing the relay.
         const unsubscribe = runtime.onClientEvent(
           (event) => {
             emit(event)

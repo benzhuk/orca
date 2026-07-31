@@ -2725,8 +2725,9 @@ export class OrcaRuntimeService {
   private ptyController: RuntimePtyController | null = null
   private notifier: RuntimeNotifier | null = null
   private clientEventListeners = new Set<(event: RuntimeClientEvent) => void>()
-  // Why: mobile subscribers have no terminalSideEffects consumer; excluded listeners
-  // neither receive batches nor keep fact production armed.
+  // Why: mobile subscribers discard terminalSideEffects; excluded listeners are
+  // skipped when a batch fans out (they still count as consumer-availability, see
+  // refreshTerminalSideEffectConsumerAvailability).
   private terminalSideEffectExcludedClientEventListeners = new Set<
     (event: RuntimeClientEvent) => void
   >()
@@ -4764,17 +4765,24 @@ export class OrcaRuntimeService {
 
   private emitClientEvent(event: RuntimeClientEvent): void {
     // Why: mobile streams discard terminalSideEffects; skip excluded listeners so
-    // paired phones never receive the per-OSC batch frames over the relay.
-    const listeners =
+    // paired phones never receive the per-OSC batch frames over the relay. Filtered
+    // inside the delivery callback to keep live-Set iteration (a listener that
+    // unsubscribes mid-fan-out must not be delivered to) and stay allocation-free.
+    const skipExcluded =
       event.type === 'terminalSideEffects' &&
       this.terminalSideEffectExcludedClientEventListeners.size > 0
-        ? [...this.clientEventListeners].filter(
-            (listener) => !this.terminalSideEffectExcludedClientEventListeners.has(listener)
-          )
-        : this.clientEventListeners
     // Why: a throwing subscriber here once escaped acquireWorktreeTerminalSpawn after it took the
     // per-worktree terminal mutation, leaking it and wedging that worktree's sleep until restart.
-    notifyRuntimeListeners(listeners, (listener) => listener(event), 'client-event')
+    notifyRuntimeListeners(
+      this.clientEventListeners,
+      (listener) => {
+        if (skipExcluded && this.terminalSideEffectExcludedClientEventListeners.has(listener)) {
+          return
+        }
+        listener(event)
+      },
+      'client-event'
+    )
   }
 
   notifyNativeChatLaunchDraftResolved(
@@ -9776,9 +9784,12 @@ export class OrcaRuntimeService {
   }
 
   private refreshTerminalSideEffectConsumerAvailability(): void {
+    // Why: counts ALL subscribers, mobile included. Excluding phones would flip
+    // availability whenever the last desktop client leaves/returns on a
+    // phone-attached host, and the rebuild below cancels armed stale-working-title
+    // timers — the phone would keep a stuck 'working' spinner (#1437).
     const nextAvailable =
-      this.terminalSideEffectLocalConsumerAvailable ||
-      this.countTerminalSideEffectConsumingClientEventListeners() > 0
+      this.terminalSideEffectLocalConsumerAvailable || this.clientEventListeners.size > 0
     if (nextAvailable === this.terminalSideEffectConsumerAvailable) {
       return
     }

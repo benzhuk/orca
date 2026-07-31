@@ -8488,32 +8488,56 @@ describe('OrcaRuntimeService', () => {
       expect(mobileEvents.map((event) => event.type)).toEqual(['worktreesChanged'])
     })
 
-    it('keeps fact production idle when only non-consuming listeners exist', () => {
+    it('keeps a phone-only host producing title state without emitting batches to it', async () => {
+      vi.useFakeTimers()
+      try {
+        const ptyId = `${TEST_REPO_ID}::/tmp/worktree-a@@pty-a`
+        const runtime = new OrcaRuntimeService(store)
+        const mobileEvents: RuntimeClientEvent[] = []
+        const trackerEntries = (
+          runtime as unknown as { ptyTitleTrackersByPtyId: Map<string, unknown> }
+        ).ptyTitleTrackersByPtyId
+        runtime.setPtyController({
+          write: () => true,
+          kill: () => true,
+          getForegroundProcess: async () => null,
+          listProcesses: async () => [{ id: ptyId, cwd: '/tmp/worktree-a', title: 'shell' }]
+        })
+        runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
+        runtime.onClientEvent((event) => mobileEvents.push(event), {
+          consumesTerminalSideEffects: false
+        })
+        const unsubscribeDesktop = runtime.onClientEvent(() => {})
+
+        runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', 100)
+        runtime.onPtyData(ptyId, 'output without a title\r\n', 101)
+        // The phone is still subscribed: disposing trackers on this edge would cancel
+        // its armed stale-working-title timer and strand a 'working' spinner (#1437).
+        unsubscribeDesktop()
+
+        await vi.advanceTimersByTimeAsync(3_000)
+
+        expect(trackerEntries.has(ptyId)).toBe(true)
+        expect((await runtime.listTerminals()).terminals[0]).toMatchObject({ title: 'Codex' })
+        expect(mobileEvents.some((event) => event.type === 'terminalSideEffects')).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('skips a listener unsubscribed mid-fan-out even with mobile exclusions active', () => {
       const runtime = new OrcaRuntimeService(store)
-      const mobileEvents: RuntimeClientEvent[] = []
-      const trackerEntries = (
-        runtime as unknown as {
-          ptyTitleTrackersByPtyId: Map<string, { commandCodeDetector: unknown }>
-        }
-      ).ptyTitleTrackersByPtyId
+      const lateEvents: RuntimeClientEvent[] = []
       runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
-      runtime.onClientEvent((event) => mobileEvents.push(event), {
-        consumesTerminalSideEffects: false
+      runtime.onClientEvent(() => {}, { consumesTerminalSideEffects: false })
+      runtime.onClientEvent(() => {
+        unsubscribeLate()
       })
+      const unsubscribeLate = runtime.onClientEvent((event) => lateEvents.push(event))
 
-      runtime.onPtyData('pty-remote', '\x1b]0;Codex working\x07\x07', 100)
+      runtime.onPtyData('pty-remote', '\x1b]0;Codex working\x07', 100)
 
-      expect(mobileEvents).toEqual([])
-      expect(trackerEntries.get('pty-remote')?.commandCodeDetector).toBeNull()
-
-      // A consuming listener re-arms production without leaking batches to mobile.
-      const desktopEvents: RuntimeClientEvent[] = []
-      runtime.onClientEvent((event) => desktopEvents.push(event))
-      runtime.onPtyData('pty-remote', '\x07', 101)
-
-      expect(desktopEvents.map((event) => event.type)).toEqual(['terminalSideEffects'])
-      expect(mobileEvents).toEqual([])
-      expect(trackerEntries.get('pty-remote')?.commandCodeDetector).not.toBeNull()
+      expect(lateEvents).toEqual([])
     })
 
     it('emits one batched event per chunk with facts in byte order and attribution', () => {
