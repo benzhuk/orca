@@ -44,8 +44,10 @@ import type {
   GlobalSettings
 } from '../../../../shared/types'
 import type {
+  InactiveAccountUsage,
   ProviderRateLimits,
   RateLimitRuntimeTarget,
+  RateLimitState,
   RateLimitWindow
 } from '../../../../shared/rate-limit-types'
 import { resolveLocalAccountRuntimeTarget } from '../../../../shared/local-account-runtime'
@@ -92,7 +94,8 @@ import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import {
   fetchProviderAccountsSnapshot,
   selectClaudeProviderAccount,
-  selectCodexProviderAccount
+  selectCodexProviderAccount,
+  watchProviderAccounts
 } from '@/runtime/runtime-provider-accounts-client'
 import { translate } from '@/i18n/i18n'
 import {
@@ -564,6 +567,21 @@ export function resolveClaudeStatusAccountState(
   return getClaudeStatusAccountsFromSettings(settings) ?? runtimeState
 }
 
+// Why: the local rate-limit store only ever describes this desktop — its poll
+// never reads a remote server's credentials — so a remote-owned roster must take
+// its per-account usage from the accounts snapshot, whose account ids come from
+// the same runtime as the rows being rendered (#7973).
+export function resolveInactiveAccountUsage(
+  hasRemoteAccountOwner: boolean,
+  snapshotUsage: InactiveAccountUsage[] | undefined,
+  localUsage: InactiveAccountUsage[]
+): InactiveAccountUsage[] {
+  if (!hasRemoteAccountOwner) {
+    return localUsage
+  }
+  return snapshotUsage ?? []
+}
+
 function CodexRestartStatusPrompt(): React.JSX.Element | null {
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
   const ptyIdsByTabId = useAppStore((s) => s.ptyIdsByTabId)
@@ -696,6 +714,7 @@ export function ClaudeSwitcherMenu({
     activeAccountIdsByRuntime: { host: null, wsl: {} }
   })
   const [isSwitching, setIsSwitching] = useState(false)
+  const [snapshotRateLimits, setSnapshotRateLimits] = useState<RateLimitState | null>(null)
   const mountedRef = useRef(true)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
@@ -748,6 +767,8 @@ export function ClaudeSwitcherMenu({
     }
     if (mountedRef.current) {
       setAccounts(snapshot.claude)
+      // Local snapshots carry no rate limits, so this stays null off a remote.
+      setSnapshotRateLimits(snapshot.rateLimits)
     }
   }, [activeRuntimeEnvironmentId])
 
@@ -756,6 +777,36 @@ export function ClaudeSwitcherMenu({
       console.error('Failed to load Claude accounts for status bar:', error)
     })
   }, [loadAccounts, claudeAccountSyncKey])
+
+  // Why: a remote runtime fills its inactive-usage cache lazily AFTER the
+  // accounts.subscribe ready snapshot, so a one-shot read can only ever catch
+  // rows mid-fetch. Hold the stream open while the menu is open and let each
+  // per-account completion broadcast fill the bars in place — the local path
+  // gets the same in-place updates from the rate-limit service's IPC pushes.
+  useEffect(() => {
+    if (!open || !hasActiveRuntimeEnvironment) {
+      return
+    }
+    const watcher = watchProviderAccounts(
+      { activeRuntimeEnvironmentId },
+      {
+        onSnapshot: (snapshot) => {
+          // A failed Claude half is a substituted empty roster; keep prior state.
+          if (snapshot.failedProviders?.includes('claude')) {
+            return
+          }
+          setAccounts(snapshot.claude)
+          setSnapshotRateLimits(snapshot.rateLimits)
+        },
+        onError: (error) => {
+          console.error('Failed to watch Claude accounts for status bar:', error)
+        }
+      }
+    )
+    return () => {
+      watcher.close()
+    }
+  }, [activeRuntimeEnvironmentId, hasActiveRuntimeEnvironment, open])
 
   const handleOpenChange = useCallback((nextOpen: boolean): void => {
     setOpen(nextOpen)
@@ -841,6 +892,11 @@ export function ClaudeSwitcherMenu({
   const selectedGroup =
     switchGroups.find((group) => group.key === selectedRuntimeKey) ?? switchGroups[0]
   const activeTarget = selectedGroup?.targets.find((target) => target.active)
+  const inactiveAccountUsage = resolveInactiveAccountUsage(
+    hasActiveRuntimeEnvironment,
+    snapshotRateLimits?.inactiveClaudeAccounts,
+    inactiveClaudeAccounts
+  )
 
   return (
     <ProviderDetailsMenu
@@ -899,7 +955,7 @@ export function ClaudeSwitcherMenu({
             ) : null}
             {selectedGroup?.targets.map((target) => {
               const inactiveUsage = target.id
-                ? inactiveClaudeAccounts.find((a) => a.accountId === target.id)
+                ? inactiveAccountUsage.find((a) => a.accountId === target.id)
                 : null
 
               return (
