@@ -13,6 +13,7 @@ import {
   writeClaudeManagedAuthFile
 } from './managed-auth-path'
 import { parseWslUncPath } from '../../shared/wsl-paths'
+import { isServeModeProcess } from '../serve-mode'
 import { resolveLocalAccountRuntimeTarget } from '../../shared/local-account-runtime'
 import { getDefaultWslDistro, getWslHome, toWindowsWslPath } from '../wsl'
 import { buildEncodedWslBashCommand } from '../wsl-bash-command'
@@ -313,7 +314,16 @@ export class ClaudeRuntimeAuthService {
           await this.restoreSystemDefaultSnapshot(this.lastWrittenCredentialsJson, undefined)
         }
       }
-      this.store.updateSettings({ activeClaudeManagedAccountId: null })
+      if (!this.shouldRetainSelectionAfterManagedAuthFailure(activeAccount)) {
+        this.store.updateSettings({
+          activeClaudeManagedAccountId: null,
+          activeClaudeManagedAccountIdsByRuntime: setSelectedClaudeAccountIdForTarget(
+            normalizeClaudeRuntimeSelection(settings),
+            null,
+            normalizedTarget
+          )
+        })
+      }
       this.lastSyncedAccountId = null
       return
     }
@@ -338,7 +348,16 @@ export class ClaudeRuntimeAuthService {
           await this.restoreSystemDefaultSnapshot(this.lastWrittenCredentialsJson, undefined)
         }
       }
-      this.store.updateSettings({ activeClaudeManagedAccountId: null })
+      if (!this.shouldRetainSelectionAfterManagedAuthFailure(activeAccount)) {
+        this.store.updateSettings({
+          activeClaudeManagedAccountId: null,
+          activeClaudeManagedAccountIdsByRuntime: setSelectedClaudeAccountIdForTarget(
+            normalizeClaudeRuntimeSelection(settings),
+            null,
+            normalizedTarget
+          )
+        })
+      }
       this.lastSyncedAccountId = null
       return
     }
@@ -1118,6 +1137,30 @@ export class ClaudeRuntimeAuthService {
     return resolveOwnedClaudeManagedAuthPath(account.id, account.managedAuthPath, {
       adoptLegacyMarker: true
     })
+  }
+
+  /** Whether a managed-auth read failure should leave the account selected.
+   *
+   *  Desktop clears the selection so the switcher does not keep offering an account
+   *  whose credentials this runtime just failed to materialize; the user can pick it
+   *  again once it is fixed. Headless `orca serve` has no such UI, so a transient
+   *  failure (a directory mid-rewrite, an fs error the ownership probe swallows) left
+   *  the runtime running on the default config dir with no way back (#10922). Keep the
+   *  selection there while the account's auth directory is still on disk — the next
+   *  sync re-materializes it — and clear it only once the account is genuinely gone.
+   *
+   *  Retaining the selection does NOT mean sessions use it: the caller still restores
+   *  the system default for this sync, and the accounts snapshot carries no health
+   *  field, so the only signal of the divergence is the warning above. */
+  private shouldRetainSelectionAfterManagedAuthFailure(account: ClaudeManagedAccount): boolean {
+    if (!isServeModeProcess()) {
+      return false
+    }
+    try {
+      return existsSync(account.managedAuthPath)
+    } catch {
+      return false
+    }
   }
 
   private async captureSystemDefaultSnapshotForManagedEntry(
