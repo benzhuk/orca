@@ -3,7 +3,7 @@ import { join, relative, resolve, sep } from 'node:path'
 import { app } from 'electron'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
 
-const MANAGED_AUTH_MARKER = '.orca-managed-claude-auth'
+export const MANAGED_AUTH_MARKER = '.orca-managed-claude-auth'
 
 export function getClaudeManagedAccountsRoot(): string {
   return join(app.getPath('userData'), 'claude-accounts')
