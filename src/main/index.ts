@@ -110,6 +110,7 @@ import {
   installServeSupervisorDisconnectQuit,
   notifyServeSupervisorReady
 } from './serve-update-handoff'
+import { isServeModeProcess } from './serve-mode'
 import {
   configureElectronNetworkCompatibility,
   configureDevUserDataPath,
@@ -372,7 +373,7 @@ let gpuFeatureStatus: Electron.GPUFeatureStatus | null = null
 let localPtyStartupReady: Promise<void> = Promise.resolve()
 let localPtyProviderStartupReady: Promise<void> = Promise.resolve()
 const AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS = 30_000
-const isServeMode = process.argv.includes('--serve')
+const isServeMode = isServeModeProcess()
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(
