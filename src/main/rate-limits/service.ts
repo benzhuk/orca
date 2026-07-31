@@ -180,6 +180,7 @@ export class RateLimitService {
     antigravity: 0
   }
   private mainWindow: BrowserWindow | null = null
+  private headlessPolling = false
   private detachWindowListeners: (() => void) | null = null
   private isFetching = false
   private fullFetchQueued = false
@@ -301,6 +302,14 @@ export class RateLimitService {
     mainWindow.on('restore', refreshOnResume)
     mainWindow.on('closed', onClosed)
     this.detachWindowListeners = detachWindowListeners
+  }
+
+  /** Why: headless `orca serve` never calls attach(), so the window gate below would
+   *  park the poller forever and every usage bar the runtime serves to desktop and
+   *  mobile clients would stay empty (#10922). The cadence is unchanged — the same
+   *  pollInterval timer, just not conditioned on a window that cannot exist. */
+  enableHeadlessPolling(): void {
+    this.headlessPolling = true
   }
 
   start(options: { fetchImmediately?: boolean } = {}): void {
@@ -772,6 +781,9 @@ export class RateLimitService {
   }
 
   private shouldBackgroundPoll(): boolean {
+    if (this.headlessPolling) {
+      return true
+    }
     if (!this.mainWindow || this.mainWindow.isDestroyed()) {
       return false
     }
