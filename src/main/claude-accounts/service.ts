@@ -16,6 +16,7 @@ import { resolveClaudeCommand } from '../codex-cli/command'
 import type { ClaudeRuntimeAuthService } from './runtime-auth-service'
 import {
   getClaudeManagedAccountsRoot,
+  MANAGED_AUTH_MARKER,
   readClaudeManagedAuthFile,
   resolveOwnedClaudeManagedAuthPath,
   writeClaudeManagedAuthFile
@@ -85,6 +86,18 @@ type ManagedClaudeAuthLocation = {
   managedAuthRuntime: 'host' | 'wsl'
   wslDistro: string | null
   wslLinuxAuthPath: string | null
+}
+
+// Why: rollback deletes the whole account directory, so it may only run against
+// storage this add attempt created. A directory that was already there can hold
+// credentials seeded outside the GUI login flow (the headless `orca serve` path),
+// and a recoverable add failure must not destroy them (#10922).
+type NewManagedClaudeAuthLocation = ManagedClaudeAuthLocation & {
+  createdAccountDir: boolean
+  // Why: the add stamps its own ownership marker into the directory. Keeping the
+  // directory is only half a rescue — without putting the previous marker back, the
+  // account that owns it fails every ownership probe from here on.
+  previousAuthMarker: string | null
 }
 
 class DuplicateClaudeAccountError extends Error {}
@@ -169,7 +182,7 @@ export class ClaudeAccountService {
         captured
       )
     } catch (error) {
-      await this.cleanupFailedAdd(accountId, managedAuth.managedAuthPath, previousSettings, error)
+      await this.cleanupFailedAdd(accountId, managedAuth, previousSettings, error)
       throw error
     }
   }
@@ -193,7 +206,7 @@ export class ClaudeAccountService {
         captured
       )
     } catch (error) {
-      await this.cleanupFailedAdd(accountId, managedAuth.managedAuthPath, previousSettings, error)
+      await this.cleanupFailedAdd(accountId, managedAuth, previousSettings, error)
       throw error
     }
   }
@@ -297,7 +310,7 @@ export class ClaudeAccountService {
 
   private async rollbackAddAccount(
     accountId: string,
-    managedAuthPath: string,
+    managedAuth: NewManagedClaudeAuthLocation,
     previousSettings: ReturnType<Store['getSettings']>
   ): Promise<void> {
     this.restoreClaudeSettings(previousSettings)
@@ -308,22 +321,65 @@ export class ClaudeAccountService {
     } catch (rollbackError) {
       console.warn('[claude-accounts] Rollback rematerialization failed:', rollbackError)
     }
-    await this.safeRemoveManagedAuth(accountId, managedAuthPath)
+    await this.removeManagedAuthForFailedAdd(accountId, managedAuth)
   }
 
   private async cleanupFailedAdd(
     accountId: string,
-    managedAuthPath: string,
+    managedAuth: NewManagedClaudeAuthLocation,
     previousSettings: ReturnType<Store['getSettings']>,
     error: unknown
   ): Promise<void> {
     if (error instanceof DuplicateClaudeAccountError) {
       // Why: duplicate detection precedes writes; rollback I/O could only mask
       // the useful duplicate-account error.
-      await this.safeRemoveManagedAuth(accountId, managedAuthPath)
+      await this.removeManagedAuthForFailedAdd(accountId, managedAuth)
       return
     }
-    await this.rollbackAddAccount(accountId, managedAuthPath, previousSettings)
+    await this.rollbackAddAccount(accountId, managedAuth, previousSettings)
+  }
+
+  private async removeManagedAuthForFailedAdd(
+    accountId: string,
+    managedAuth: NewManagedClaudeAuthLocation
+  ): Promise<void> {
+    if (managedAuth.createdAccountDir) {
+      await this.safeRemoveManagedAuth(accountId, managedAuth.managedAuthPath)
+      return
+    }
+    // Why: the directory predates this attempt, so its credentials are not ours to
+    // delete; only the Keychain item this attempt could have written is (it is keyed
+    // by the account id generated for this add).
+    console.warn(
+      '[claude-accounts] Keeping pre-existing managed Claude auth storage after a failed add:',
+      managedAuth.managedAuthPath
+    )
+    this.restorePreviousAuthMarker(managedAuth)
+    await deleteManagedClaudeKeychainCredentials(accountId)
+  }
+
+  private readAuthMarker(markerPath: string): string | null {
+    try {
+      return existsSync(markerPath) ? readFileSync(markerPath, 'utf-8') : null
+    } catch {
+      return null
+    }
+  }
+
+  // Why: createManagedAuthDir stamps this attempt's account id over whatever marker
+  // was there. Handing the directory back means handing its ownership back too, or the
+  // account that owns it fails resolveOwnedClaudeManagedAuthPath from here on.
+  private restorePreviousAuthMarker(managedAuth: NewManagedClaudeAuthLocation): void {
+    const markerPath = join(managedAuth.managedAuthPath, MANAGED_AUTH_MARKER)
+    try {
+      if (managedAuth.previousAuthMarker === null) {
+        rmSync(markerPath, { force: true })
+        return
+      }
+      writeFileSync(markerPath, managedAuth.previousAuthMarker, 'utf-8')
+    } catch (error) {
+      console.warn('[claude-accounts] Failed to restore the managed auth marker:', error)
+    }
   }
 
   private async doReauthenticateAccount(accountId: string): Promise<ClaudeRateLimitAccountsState> {
@@ -883,27 +939,33 @@ export class ClaudeAccountService {
   private createManagedAuthDir(
     accountId: string,
     target?: ClaudeAccountAddTarget
-  ): ManagedClaudeAuthLocation {
+  ): NewManagedClaudeAuthLocation {
     const wslAuth = this.tryCreateWslManagedAuthDir(accountId, target)
     if (wslAuth) {
       return wslAuth
     }
 
-    const managedAuthPath = join(this.getManagedAccountsRoot(), accountId, 'auth')
+    const accountDirPath = join(this.getManagedAccountsRoot(), accountId)
+    const createdAccountDir = !existsSync(accountDirPath)
+    const managedAuthPath = join(accountDirPath, 'auth')
     mkdirSync(managedAuthPath, { recursive: true })
-    writeFileSync(join(managedAuthPath, '.orca-managed-claude-auth'), `${accountId}\n`, 'utf-8')
+    const markerPath = join(managedAuthPath, MANAGED_AUTH_MARKER)
+    const previousAuthMarker = createdAccountDir ? null : this.readAuthMarker(markerPath)
+    writeFileSync(markerPath, `${accountId}\n`, 'utf-8')
     return {
       managedAuthPath: this.assertManagedAuthPath(managedAuthPath, accountId),
       managedAuthRuntime: 'host',
       wslDistro: null,
-      wslLinuxAuthPath: null
+      wslLinuxAuthPath: null,
+      createdAccountDir,
+      previousAuthMarker
     }
   }
 
   private tryCreateWslManagedAuthDir(
     accountId: string,
     target?: ClaudeAccountAddTarget
-  ): ManagedClaudeAuthLocation | null {
+  ): NewManagedClaudeAuthLocation | null {
     if (process.platform !== 'win32' || target?.runtime !== 'wsl') {
       return null
     }
@@ -944,7 +1006,12 @@ export class ClaudeAccountService {
       managedAuthPath: this.assertManagedAuthPath(managedAuthPath, accountId),
       managedAuthRuntime: 'wsl',
       wslDistro: distro,
-      wslLinuxAuthPath
+      wslLinuxAuthPath,
+      // Why: the guest `mkdir -p` above owns this directory for a freshly generated
+      // account id; keep today's unconditional rollback rather than paying a second
+      // wsl.exe round-trip to probe it (Windows-only path, unrelated to #10922).
+      createdAccountDir: true,
+      previousAuthMarker: null
     }
   }
 
