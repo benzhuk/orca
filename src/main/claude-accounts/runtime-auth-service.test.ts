@@ -17,8 +17,12 @@ import { join } from 'node:path'
 import { getDefaultSettings } from '../../shared/constants'
 import type { ClaudeManagedAccount, GlobalSettings } from '../../shared/types'
 import { isOauthTokenExpiring, refreshClaudeOauthCredentials } from './oauth-refresh'
+import { getSelectedClaudeAccountIdForTarget } from './runtime-selection'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+// Why: isServeModeProcess() reads process.argv with no argument, so serve-mode cases
+// have to mutate it; keep the original so nothing leaks into a sibling test.
+const originalArgv = process.argv
 const hostPlatform = process.platform
 const testState = {
   userDataDir: '',
@@ -282,6 +286,7 @@ describe('ClaudeRuntimeAuthService', () => {
     if (originalPlatform) {
       Object.defineProperty(process, 'platform', originalPlatform)
     }
+    process.argv = originalArgv
     rmSync(testState.userDataDir, { recursive: true, force: true })
     rmSync(testState.fakeHomeDir, { recursive: true, force: true })
   })
@@ -3927,5 +3932,67 @@ describe('ClaudeRuntimeAuthService', () => {
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(runtimeRotated)
+  })
+
+  // Why: these three lock the serve-gated retention added for #10922. They assert
+  // through getSelectedClaudeAccountIdForTarget, not the legacy scalar, because the
+  // per-runtime map is what every selection reader actually consults.
+  it('keeps the managed selection on headless serve when the auth directory survives', async () => {
+    setPlatform('linux')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', '{not-json')
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
+      activeClaudeManagedAccountId: 'account-1',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'account-1', wsl: {} }
+    })
+    const store = createStore(settings)
+    process.argv = [...process.argv, '--serve']
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    expect(getSelectedClaudeAccountIdForTarget(store.getSettings(), { runtime: 'host' })).toBe(
+      'account-1'
+    )
+  })
+
+  it('clears the managed selection on headless serve when the auth directory is gone', async () => {
+    setPlatform('linux')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', '{not-json')
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
+      activeClaudeManagedAccountId: 'account-1',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'account-1', wsl: {} }
+    })
+    const store = createStore(settings)
+    rmSync(join(testState.userDataDir, 'claude-accounts', 'account-1'), {
+      recursive: true,
+      force: true
+    })
+    process.argv = [...process.argv, '--serve']
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    expect(getSelectedClaudeAccountIdForTarget(store.getSettings(), { runtime: 'host' })).toBeNull()
+  })
+
+  it('clears the managed selection on desktop even when the auth directory survives', async () => {
+    setPlatform('linux')
+    const managedAuthPath = createManagedClaudeAuth(testState.userDataDir, 'account-1', '{not-json')
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
+      activeClaudeManagedAccountId: 'account-1',
+      activeClaudeManagedAccountIdsByRuntime: { host: 'account-1', wsl: {} }
+    })
+    const store = createStore(settings)
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    expect(getSelectedClaudeAccountIdForTarget(store.getSettings(), { runtime: 'host' })).toBeNull()
   })
 })

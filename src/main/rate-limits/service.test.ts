@@ -2377,4 +2377,51 @@ describe('RateLimitService', () => {
       expect(fetchClaudeRateLimits).not.toHaveBeenCalled()
     })
   })
+
+  describe('headless serve polling', () => {
+    it('polls with no attached window once headless polling is enabled', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 12))
+        vi.mocked(fetchCodexRateLimits).mockResolvedValue(okProvider('codex', 24))
+        const service = new RateLimitService()
+
+        service.enableHeadlessPolling()
+        service.start({ fetchImmediately: false })
+
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(fetchClaudeRateLimits).toHaveBeenCalledTimes(1)
+
+        // Why: the cadence must stay the desktop interval — one more fetch after a
+        // full DEFAULT_POLL_MS window, not a tighter loop.
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+        expect(fetchClaudeRateLimits).toHaveBeenCalledTimes(2)
+
+        service.stop()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('stays parked with no attached window when headless polling is not enabled', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 12))
+        vi.mocked(fetchCodexRateLimits).mockResolvedValue(okProvider('codex', 24))
+        const service = new RateLimitService()
+
+        service.start({ fetchImmediately: false })
+
+        await vi.advanceTimersByTimeAsync(1000)
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
+
+        expect(fetchClaudeRateLimits).not.toHaveBeenCalled()
+        expect(fetchCodexRateLimits).not.toHaveBeenCalled()
+
+        service.stop()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
 })
