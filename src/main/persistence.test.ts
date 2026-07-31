@@ -4930,12 +4930,17 @@ describe('Store', () => {
     expect(store.getWorktreeMeta('wt-malformed')?.linkedTaskSourceContext).toBeNull()
   })
 
-  it('drops a null worktreeMeta entry while still normalizing valid siblings', async () => {
+  it('drops corrupt worktreeMeta entries while still normalizing valid siblings', async () => {
     writeDataFile({
       schemaVersion: 1,
       repos: [],
+      worktreeLineageById: { 'r1::/tmp/wt': { parentWorktreeId: 'wt-sibling' } },
+      workspaceLineageByChildKey: {
+        'worktree:r1::/tmp/wt': { parentWorkspaceKey: 'worktree:wt-sibling' }
+      },
       worktreeMeta: {
         'r1::/tmp/wt': null,
+        'r1::/tmp/scalar': 5,
         'wt-sibling': {
           linkedWorkItem: {
             provider: 'jira',
@@ -4966,11 +4971,16 @@ describe('Store', () => {
 
     expect(store.getWorktreeMeta('wt-sibling')?.linkedWorkItem?.jiraIdentifier).toBe('ORCA-123')
     expect(store.getWorktreeMeta('wt-sibling')?.linkedTaskSourceContext).toBeNull()
-    // The null entry must not survive: gcStaleWorktreeMeta keeps timestamp-less keys, and downstream
+    // Corrupt entries must not survive: gcStaleWorktreeMeta keeps timestamp-less keys, and downstream
     // consumers deref worktreeMeta values unguarded (also keeps a rollback to an older build loadable).
     expect(store.getAllWorktreeMeta()).not.toHaveProperty('r1::/tmp/wt')
+    expect(store.getAllWorktreeMeta()).not.toHaveProperty('r1::/tmp/scalar')
+    expect(store.getWorktreeLineage('r1::/tmp/wt')).toBeUndefined()
     store.flush()
-    expect((readDataFile() as PersistedState).worktreeMeta).not.toHaveProperty('r1::/tmp/wt')
+    const persisted = readDataFile() as PersistedState
+    expect(persisted.worktreeMeta).not.toHaveProperty('r1::/tmp/wt')
+    expect(persisted.worktreeMeta).not.toHaveProperty('r1::/tmp/scalar')
+    expect(persisted.workspaceLineageByChildKey).not.toHaveProperty('worktree:r1::/tmp/wt')
   })
 
   it('creates and updates folder workspaces from folder-backed project groups', async () => {
