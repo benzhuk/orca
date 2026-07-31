@@ -28,5 +28,22 @@ export const ACCOUNT_COMMAND_SPECS: CommandSpec[] = [
       'Lists the accounts on this machine. `--environment` / `--pairing-code` are rejected rather than ignored; run it on the host whose accounts you want to see.'
     ],
     examples: ['orca account list']
+  },
+  {
+    path: ['account', 'select'],
+    summary: 'Select the active managed Claude account by email',
+    usage:
+      'orca account select --email <email> [--agent claude] [--environment <selector>] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'agent', 'email'],
+    notes: [
+      "Resolves --email to a managed account (case-insensitive) via the runtime's account list, then makes it the active Claude account there.",
+      "Unlike `account add` / `account list`, `--environment` DOES retarget this command — point it at a saved environment to switch a remote host's active account without SSHing in; this is the cross-scope account-switch primitive.",
+      '--agent defaults to claude; codex is not supported by this command yet.',
+      'Without --environment it uses ORCA_ENVIRONMENT / ORCA_PAIRING_CODE when set, like other remote-capable commands.'
+    ],
+    examples: [
+      'orca account select --email jane@example.com',
+      'orca account select --email jane@example.com --environment homelab'
+    ]
   }
 ]
