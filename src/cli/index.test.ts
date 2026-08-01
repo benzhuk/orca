@@ -270,6 +270,34 @@ describe('account select remote targeting', () => {
   })
 })
 
+describe('account usage remote targeting', () => {
+  beforeEach(() => {
+    callMock.mockReset()
+    runtimeClientConstructorMock.mockClear()
+  })
+
+  it('accepts --environment on `account usage`, like `account select`', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    queueFixtures(
+      callMock,
+      okFixture('req-1', {
+        claude: {
+          accounts: [{ id: 'claude-1', email: 'jane@example.com' }],
+          activeAccountId: 'claude-1',
+          activeAccountIdsByRuntime: { host: 'claude-1', wsl: {} }
+        },
+        rateLimits: { claude: null, inactiveClaudeAccounts: [] }
+      })
+    )
+
+    await main(['account', 'usage', '--environment', 'homelab', '--json'], '/tmp/repo')
+
+    expect(process.exitCode).not.toBe(1)
+    expect(runtimeClientConstructorMock).toHaveBeenCalledWith(undefined, 'homelab')
+    logSpy.mockRestore()
+  })
+})
+
 describe('unknown command surfaces a suggestion', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>
 

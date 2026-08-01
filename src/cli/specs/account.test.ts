@@ -72,4 +72,11 @@ describe('account command specs', () => {
     expect(select.usage).toContain('--account-id <id>')
     expect(select.notes?.join('\n')).toContain('Exactly one of --email / --account-id')
   })
+
+  it('documents `account usage` as --environment-retargetable, like `account select`', () => {
+    const usage = spec('account usage')
+
+    expect(effectiveAllowedFlags(usage)).toContain('environment')
+    expect(usage.notes?.join('\n')).toContain('DOES retarget')
+  })
 })

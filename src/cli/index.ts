@@ -20,11 +20,12 @@ export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selec
 const COMMAND_PATHS = COMMAND_SPECS.flatMap((spec) => specPaths(spec))
 
 function shouldIgnoreRemoteSelection(commandPath: string[]): boolean {
-  // Why: `account select` is the CLI's cross-scope account-switch primitive; it
-  // must be able to target a saved remote environment via --environment, unlike
-  // `account add` / `account list`, which stay pinned to the local host.
+  // Why: `account select` is the CLI's cross-scope account-switch primitive, and
+  // `account usage` reads per-account usage FROM a target runtime — both must
+  // reach a saved remote environment via --environment, unlike `account add` /
+  // `account list`, which stay pinned to the local host.
   if (commandPath[0] === 'account') {
-    return commandPath[1] !== 'select'
+    return commandPath[1] !== 'select' && commandPath[1] !== 'usage'
   }
   return (
     commandPath[0] === 'environment' ||

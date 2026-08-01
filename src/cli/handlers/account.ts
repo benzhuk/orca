@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { formatAccountsBlock } from '../account-format'
 import { resolveClaudeAccountSelection, type AccountsListSnapshot } from '../account-select'
+import { buildClaudeAccountUsageRows } from '../account-usage'
+import { formatClaudeAccountUsageTable } from '../account-usage-format'
+import { fetchClaudeAccountUsage } from '../account-usage-transport'
 import type { CommandHandler, HandlerContext } from '../dispatch'
 import { getOptionalStringFlag } from '../flags'
 import { printResult } from '../format'
@@ -317,5 +320,22 @@ export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
       accountId
     })
     printResult(result, json, (state) => formatAccountsBlock('Claude', state))
+  },
+  'account usage': async ({ client, json }) => {
+    const fetched = await fetchClaudeAccountUsage(client)
+    const accounts = buildClaudeAccountUsageRows(
+      fetched.snapshot.claude,
+      fetched.snapshot.rateLimits
+    )
+    printResult(
+      {
+        id: 'account-usage',
+        ok: true,
+        result: { accounts, partial: fetched.partial },
+        _meta: { runtimeId: fetched.runtimeId }
+      },
+      json,
+      ({ accounts: rows, partial }) => formatClaudeAccountUsageTable(rows, partial)
+    )
   }
 }
