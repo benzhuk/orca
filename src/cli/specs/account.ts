@@ -48,5 +48,19 @@ export const ACCOUNT_COMMAND_SPECS: CommandSpec[] = [
       'orca account select --account-id b3f0b6b0-1c1a-4b8e-9a9b-2f6e9a9b2f6e',
       'orca account select --email jane@example.com --environment homelab'
     ]
+  },
+  {
+    path: ['account', 'usage'],
+    summary: 'Show per-account Claude session/weekly usage from a runtime',
+    usage: 'orca account usage [--environment <selector>] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS],
+    notes: [
+      "Reads each managed Claude account's session (5h) and weekly (7d) usage percent + reset time from the target runtime's own rate-limit state — the same source the desktop status bar reads, fetched from that runtime's own IP rather than this CLI's.",
+      'Triggers a fresh refresh of every account before reading; on a healthy host this returns settled usage for all accounts in one call.',
+      'Waits up to ~12s per account for a refresh in flight; an account still unresolved after that prints as "fetching…" (or "no data" if never fetched) instead of blocking indefinitely — re-run to check again.',
+      "Like `account select`, --environment DOES retarget this command, so you can read a remote host's usage without SSHing in.",
+      'Without --environment it uses ORCA_ENVIRONMENT / ORCA_PAIRING_CODE when set, like other remote-capable commands.'
+    ],
+    examples: ['orca account usage', 'orca account usage --environment homelab --json']
   }
 ]

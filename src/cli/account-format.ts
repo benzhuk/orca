@@ -9,16 +9,21 @@ export type AccountsBlock = {
   }
 }
 
+/** The set of account ids currently active on any runtime (host or a WSL distro). */
+export function activeAccountIdSet(block: AccountsBlock): Set<string | null | undefined> {
+  return new Set([
+    block.activeAccountId,
+    block.activeAccountIdsByRuntime?.host,
+    ...Object.values(block.activeAccountIdsByRuntime?.wsl ?? {})
+  ])
+}
+
 /** Renders a provider's managed-account list as a human-readable block, marking the active account. */
 export function formatAccountsBlock(label: string, block: AccountsBlock): string {
   if (block.accounts.length === 0) {
     return `No managed ${label} accounts.`
   }
-  const activeAccountIds = new Set([
-    block.activeAccountId,
-    block.activeAccountIdsByRuntime?.host,
-    ...Object.values(block.activeAccountIdsByRuntime?.wsl ?? {})
-  ])
+  const activeAccountIds = activeAccountIdSet(block)
   const lines = block.accounts.map(
     (account) => `  ${account.email}${activeAccountIds.has(account.id) ? ' (active)' : ''}`
   )

@@ -740,4 +740,117 @@ describe('account CLI handlers', () => {
       expect(callMock).toHaveBeenCalledWith('accounts.selectClaude', { accountId: 'claude-1' })
     })
   })
+
+  describe('account usage', () => {
+    it('prints per-account session/weekly usage, marking the active account', async () => {
+      callMock.mockResolvedValue({
+        id: 'r',
+        ok: true,
+        result: {
+          claude: {
+            accounts: [{ id: 'claude-1', email: 'jane@example.com', organizationName: 'BTO' }],
+            activeAccountId: 'claude-1',
+            activeAccountIdsByRuntime: { host: 'claude-1', wsl: {} }
+          },
+          rateLimits: {
+            claude: {
+              provider: 'claude',
+              session: {
+                usedPercent: 42,
+                windowMinutes: 300,
+                resetsAt: 1,
+                resetDescription: '2:30 PM'
+              },
+              weekly: {
+                usedPercent: 18,
+                windowMinutes: 10080,
+                resetsAt: 2,
+                resetDescription: 'Thu'
+              },
+              updatedAt: 1,
+              error: null,
+              status: 'ok'
+            },
+            inactiveClaudeAccounts: []
+          }
+        },
+        _meta: { runtimeId: 'test-runtime' }
+      })
+
+      await ACCOUNT_HANDLERS['account usage']({ ...context('claude'), flags: new Map() })
+
+      expect(callMock).toHaveBeenCalledWith(
+        'accounts.list',
+        { refreshUsage: true },
+        expect.anything()
+      )
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('jane@example.com — BTO (active)')
+      )
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('session 42% (resets 2:30 PM)'))
+    })
+
+    it('prints a fetching marker and a partial-results note when a refresh is still in flight', async () => {
+      callMock.mockResolvedValue({
+        id: 'r',
+        ok: true,
+        result: {
+          claude: {
+            accounts: [{ id: 'claude-1', email: 'jane@example.com' }],
+            activeAccountId: null,
+            activeAccountIdsByRuntime: { host: null, wsl: {} }
+          },
+          rateLimits: {
+            claude: null,
+            inactiveClaudeAccounts: [
+              { accountId: 'claude-1', rateLimits: null, updatedAt: 1, isFetching: true }
+            ]
+          }
+        },
+        _meta: { runtimeId: 'test-runtime' }
+      })
+
+      await ACCOUNT_HANDLERS['account usage']({ ...context('claude'), flags: new Map() })
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('fetching…'))
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('partial'))
+    })
+
+    it('emits the structured accounts + partial shape in --json mode', async () => {
+      callMock.mockResolvedValue({
+        id: 'r',
+        ok: true,
+        result: {
+          claude: {
+            accounts: [{ id: 'claude-1', email: 'jane@example.com' }],
+            activeAccountId: 'claude-1',
+            activeAccountIdsByRuntime: { host: 'claude-1', wsl: {} }
+          },
+          rateLimits: { claude: null, inactiveClaudeAccounts: [] }
+        },
+        _meta: { runtimeId: 'test-runtime' }
+      })
+
+      await ACCOUNT_HANDLERS['account usage']({
+        ...context('claude'),
+        flags: new Map(),
+        json: true
+      })
+
+      const printed = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0]))
+      expect(printed.result.accounts).toEqual([
+        {
+          id: 'claude-1',
+          email: 'jane@example.com',
+          organizationName: null,
+          active: true,
+          status: 'no-data',
+          error: null,
+          session: null,
+          weekly: null
+        }
+      ])
+      expect(printed.result.partial).toBe(false)
+    })
+  })
 })
