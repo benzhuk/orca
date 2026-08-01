@@ -64,4 +64,12 @@ describe('account command specs', () => {
 
     expect(help).toContain('claude only')
   })
+
+  it('also accepts --account-id as an alternative to --email', () => {
+    const select = spec('account select')
+
+    expect(effectiveAllowedFlags(select)).toContain('account-id')
+    expect(select.usage).toContain('--account-id <id>')
+    expect(select.notes?.join('\n')).toContain('Exactly one of --email / --account-id')
+  })
 })

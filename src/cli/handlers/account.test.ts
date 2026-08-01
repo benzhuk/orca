@@ -670,15 +670,63 @@ describe('account CLI handlers', () => {
       await expect(
         ACCOUNT_HANDLERS['account select']({ ...context('claude'), flags: selectFlags() })
       ).rejects.toThrow(
-        '"jane@example.com" matches 2 managed Claude accounts on this runtime: claude-1 (host), claude-2 (Ubuntu). Select it in the Orca UI on that host, or remove the stale duplicate.'
+        '"jane@example.com" matches 2 managed Claude accounts on this runtime: claude-1 (host), claude-2 (Ubuntu). Retry with --account-id <id> to pick one, or remove the stale duplicate.'
       )
     })
 
-    it('requires --email', async () => {
+    it('requires --email or --account-id', async () => {
       await expect(
         ACCOUNT_HANDLERS['account select']({ ...context('claude'), flags: new Map() })
-      ).rejects.toThrow('Missing required --email')
+      ).rejects.toThrow('Provide --email or --account-id to select an account.')
       expect(callMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects passing both --email and --account-id', async () => {
+      await expect(
+        ACCOUNT_HANDLERS['account select']({
+          ...context('claude'),
+          flags: selectFlags({ 'account-id': 'claude-1' })
+        })
+      ).rejects.toThrow('Provide exactly one of --email or --account-id, not both.')
+      expect(callMock).not.toHaveBeenCalled()
+    })
+
+    it('resolves --account-id directly, skipping email matching', async () => {
+      callMock.mockImplementation((method: string) =>
+        Promise.resolve(
+          method === 'accounts.list'
+            ? listResult([
+                { id: 'claude-1', email: 'jane@example.com' },
+                { id: 'claude-2', email: 'jane@example.com' }
+              ])
+            : {
+                id: 'test',
+                ok: true,
+                result: accountState('jane@example.com'),
+                _meta: { runtimeId: 'test-runtime' }
+              }
+        )
+      )
+
+      await ACCOUNT_HANDLERS['account select']({
+        ...context('claude'),
+        flags: new Map([['account-id', 'claude-2']])
+      })
+
+      expect(callMock).toHaveBeenCalledWith('accounts.list', { refreshUsage: false })
+      expect(callMock).toHaveBeenCalledWith('accounts.selectClaude', { accountId: 'claude-2' })
+    })
+
+    it('rejects an --account-id that does not exist on this runtime', async () => {
+      callMock.mockResolvedValue(listResult([{ id: 'claude-1', email: 'jane@example.com' }]))
+
+      await expect(
+        ACCOUNT_HANDLERS['account select']({
+          ...context('claude'),
+          flags: new Map([['account-id', 'claude-nonexistent']])
+        })
+      ).rejects.toThrow('No managed Claude account found with id "claude-nonexistent"')
+      expect(callMock).not.toHaveBeenCalledWith('accounts.selectClaude', expect.anything())
     })
 
     it('rejects a codex --agent, unlike `account add`', async () => {
