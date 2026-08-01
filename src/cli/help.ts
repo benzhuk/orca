@@ -21,7 +21,7 @@ Agent Discovery:
 Accounts:
   account add               Add a managed Claude or Codex account on this Orca host
   account list              List managed Claude and Codex accounts on this Orca host
-  account select            Select the active managed Claude account by email
+  account select            Select the active managed Claude account by email or id
 
 Skills:
   skills list               List version-matched skill guides bundled with this Orca CLI
@@ -221,7 +221,7 @@ Common Commands:
   orca agent-context [--json]
   orca account add [--agent claude|codex] [--json]
   orca account list [--json]
-  orca account select --email <email> [--agent claude] [--environment <selector>] [--json]
+  orca account select (--email <email> | --account-id <id>) [--agent claude] [--environment <selector>] [--json]
   orca environment add --name <name> --pairing-code <code> [--json]
   orca environment list [--json]
   orca environment show --environment <selector> [--json]
@@ -518,6 +518,7 @@ export function formatFlagHelp(flag: string): string {
     command: '--command <text>       Command to run in the terminal on startup',
     comment: '--comment <text>       Comment stored in Orca metadata',
     cursor: '--cursor <n>           Line cursor from a previous read (returns only new output)',
+    'account-id': '--account-id <id>      Managed account id from `orca account list --json`',
     action: '--action <name>       Secondary accessibility action name',
     activate: '--activate             Reveal the new worktree in the Orca app',
     app: '--app <app>            App name, bundle ID, or pid:N',
