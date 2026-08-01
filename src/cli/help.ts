@@ -22,6 +22,7 @@ Accounts:
   account add               Add a managed Claude or Codex account on this Orca host
   account list              List managed Claude and Codex accounts on this Orca host
   account select            Select the active managed Claude account by email or id
+  account usage             Show per-account Claude session/weekly usage from a runtime
 
 Skills:
   skills list               List version-matched skill guides bundled with this Orca CLI
@@ -225,6 +226,7 @@ Common Commands:
   orca account add [--agent claude|codex] [--json]
   orca account list [--json]
   orca account select (--email <email> | --account-id <id>) [--agent claude] [--environment <selector>] [--json]
+  orca account usage [--environment <selector>] [--json]
   orca environment add --name <name> --pairing-code <code> [--json]
   orca environment list [--json]
   orca environment show --environment <selector> [--json]
