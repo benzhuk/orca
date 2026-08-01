@@ -4,8 +4,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { formatAccountsBlock } from '../account-format'
+import { resolveClaudeAccountSelection, type AccountsListSnapshot } from '../account-select'
 import type { CommandHandler, HandlerContext } from '../dispatch'
-import { getRequiredStringFlag } from '../flags'
+import { getOptionalStringFlag } from '../flags'
 import { printResult } from '../format'
 import { RuntimeClientError } from '../runtime-client'
 import { stripElectronRunAsNode } from '../runtime/launch'
@@ -23,12 +24,6 @@ import {
   type InteractiveLoginSession,
   withInteractiveLoginCleanup
 } from './interactive-login-interruption'
-
-// Why: add returns just that provider's state; list returns the full snapshot.
-type AccountsListSnapshot = {
-  claude: ClaudeRateLimitAccountsState
-  codex: CodexRateLimitAccountsState
-}
 
 function addAgentNodePaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const pathKey =
@@ -230,46 +225,6 @@ async function assertAccountImportSupported({ client }: HandlerContext): Promise
   }
 }
 
-/**
- * Resolves `--email` to exactly one managed Claude account id via `accounts.list`,
- * matching case-insensitively (Claude account emails are not guaranteed to come
- * back in one canonical case). Fails loud on zero or multiple matches instead of
- * guessing, since a silent wrong pick would switch the wrong account.
- */
-async function resolveClaudeAccountIdByEmail(
-  client: HandlerContext['client'],
-  email: string
-): Promise<string> {
-  const result = await client.call<AccountsListSnapshot>('accounts.list', { refreshUsage: false })
-  const normalized = email.trim().toLowerCase()
-  const matches = result.result.claude.accounts.filter(
-    (account) => account.email.trim().toLowerCase() === normalized
-  )
-  if (matches.length === 0) {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      `No managed Claude account found for "${email}" on this runtime. Run \`orca account list\` to see managed accounts.`
-    )
-  }
-  if (matches.length > 1) {
-    // Why: the same email is legitimately two accounts across host/WSL runtimes or two orgs,
-    // so name what differs instead of leaving the user with no next step.
-    const candidates = matches
-      .map(
-        (account) =>
-          `${account.id} (${account.wslDistro ?? account.managedAuthRuntime ?? 'host'}${
-            account.organizationName ? `, ${account.organizationName}` : ''
-          })`
-      )
-      .join(', ')
-    throw new RuntimeClientError(
-      'invalid_argument',
-      `"${email}" matches ${matches.length} managed Claude accounts on this runtime: ${candidates}. Select it in the Orca UI on that host, or remove the stale duplicate.`
-    )
-  }
-  return matches[0].id
-}
-
 /** CLI handlers for `orca account add [--agent claude|codex]`, `orca account list`, and `orca account select`. */
 export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
   'account add': async (ctx) => {
@@ -327,11 +282,12 @@ export const ACCOUNT_HANDLERS: Record<string, CommandHandler> = {
         `Unsupported --agent "${agent}". \`account select\` only supports "claude".`
       )
     }
-    const email = getRequiredStringFlag(ctx.flags, 'email')
+    const email = getOptionalStringFlag(ctx.flags, 'email')
+    const accountIdFlag = getOptionalStringFlag(ctx.flags, 'account-id')
     const { client, json } = ctx
     // Why: unlike add/list, --environment / --pairing-code are NOT rejected here —
     // this is the CLI's cross-scope account-switch primitive (see the spec notes).
-    const accountId = await resolveClaudeAccountIdByEmail(client, email)
+    const accountId = await resolveClaudeAccountSelection(client, email, accountIdFlag)
     const result = await client.call<ClaudeRateLimitAccountsState>('accounts.selectClaude', {
       accountId
     })

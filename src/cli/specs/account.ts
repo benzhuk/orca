@@ -31,18 +31,21 @@ export const ACCOUNT_COMMAND_SPECS: CommandSpec[] = [
   },
   {
     path: ['account', 'select'],
-    summary: 'Select the active managed Claude account by email',
+    summary: 'Select the active managed Claude account by email or account id',
     usage:
-      'orca account select --email <email> [--agent claude] [--environment <selector>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'agent', 'email'],
+      'orca account select (--email <email> | --account-id <id>) [--agent claude] [--environment <selector>] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'agent', 'email', 'account-id'],
     notes: [
       "Resolves --email to a managed account (case-insensitive) via the runtime's account list, then makes it the active Claude account there.",
+      '--account-id skips email resolution but still confirms the id exists in the account list first, so a typo fails clearly instead of an opaque runtime error.',
+      "Exactly one of --email / --account-id is required; the same email can legitimately match two accounts (e.g. the same address registered to two orgs), and that error names each match's --account-id to retry with.",
       "Unlike `account add` / `account list`, `--environment` DOES retarget this command — point it at a saved environment to switch a remote host's active account without SSHing in; this is the cross-scope account-switch primitive.",
       '--agent defaults to claude; codex is not supported by this command yet.',
       'Without --environment it uses ORCA_ENVIRONMENT / ORCA_PAIRING_CODE when set, like other remote-capable commands.'
     ],
     examples: [
       'orca account select --email jane@example.com',
+      'orca account select --account-id b3f0b6b0-1c1a-4b8e-9a9b-2f6e9a9b2f6e',
       'orca account select --email jane@example.com --environment homelab'
     ]
   }
