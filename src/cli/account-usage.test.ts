@@ -147,7 +147,8 @@ describe('isClaudeAccountUsageComplete', () => {
           status: 'ok',
           error: null,
           session: null,
-          weekly: null
+          weekly: null,
+        fable: null
         },
         {
           id: 'b',
@@ -157,7 +158,8 @@ describe('isClaudeAccountUsageComplete', () => {
           status: 'fetching',
           error: null,
           session: null,
-          weekly: null
+          weekly: null,
+        fable: null
         }
       ])
     ).toBe(false)
@@ -174,7 +176,8 @@ describe('isClaudeAccountUsageComplete', () => {
           status: 'ok',
           error: null,
           session: null,
-          weekly: null
+          weekly: null,
+        fable: null
         },
         {
           id: 'b',
@@ -184,7 +187,8 @@ describe('isClaudeAccountUsageComplete', () => {
           status: 'no-data',
           error: null,
           session: null,
-          weekly: null
+          weekly: null,
+        fable: null
         },
         {
           id: 'c',
@@ -194,7 +198,8 @@ describe('isClaudeAccountUsageComplete', () => {
           status: 'error',
           error: 'boom',
           session: null,
-          weekly: null
+          weekly: null,
+        fable: null
         }
       ])
     ).toBe(true)
